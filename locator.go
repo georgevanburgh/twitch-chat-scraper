@@ -9,6 +9,7 @@ import (
 
 const (
 	TWITCH_API_CHAT_PROPERTIES_ENDPOINT = "https://api.twitch.tv/api/channels/%s/chat_properties"
+	TWITCH_API_TOP_STREAM_ENDPOINT      = "https://api.twitch.tv/kraken/streams?limit=%d&broadcaster_language=en" // TODO: Make configurable
 )
 
 // Locate the best chat server to connect to for a given twitch channel
@@ -42,6 +43,19 @@ type chatPropertiesResponse struct {
 	SceTitlePresetText5             string   `json:"sce_title_preset_text_5"`
 }
 
+type streamsResponse struct {
+	Streams []stream `json:"streams"`
+}
+
+type stream struct {
+	ID      int    `json:"_id"`
+	Game    string `json:"game"`
+	Viewers int    `json:"viewers"`
+	Channel struct {
+		Name string `json:"name"`
+	} `json:"channel"`
+}
+
 func (l *Locator) GetIrcServerAddress(givenChannelName string) []string {
 	url := fmt.Sprintf(TWITCH_API_CHAT_PROPERTIES_ENDPOINT, givenChannelName)
 
@@ -56,4 +70,25 @@ func (l *Locator) GetIrcServerAddress(givenChannelName string) []string {
 	json.Unmarshal([]byte(body), &chatDetails)
 
 	return chatDetails.ChatServers
+}
+
+func (l *Locator) GetTopNChannels(givenLimit int) []string {
+	url := fmt.Sprintf(TWITCH_API_TOP_STREAM_ENDPOINT, givenLimit)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+
+	streamDetails := streamsResponse{}
+	json.Unmarshal([]byte(body), &streamDetails)
+
+	toReturn := make([]string, 0)
+	for _, stream := range streamDetails.Streams {
+		toReturn = append(toReturn, stream.Channel.Name)
+	}
+
+	return toReturn
 }

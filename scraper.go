@@ -4,8 +4,6 @@ import (
 	// "crypto/tls"
 	"fmt"
 	"github.com/sorcix/irc"
-	"net"
-	"time"
 
 	log "github.com/cihub/seelog"
 )
@@ -18,9 +16,11 @@ const (
 
 type Scraper struct {
 	chatServers *[]string
-	conn        net.Conn
+	conn        *irc.Conn
 	reader      *irc.Decoder
 	writer      *irc.Encoder
+	readChan    chan *irc.Message
+	writeChan   chan *string
 }
 
 func NewScraper() *Scraper {
@@ -41,21 +41,28 @@ func (s *Scraper) Connect(givenChannelName string) (chan<- *string, <-chan *irc.
 	// Connect to the first chat server in the list
 	// TODO: There should probably be some intelligence around selecting this
 	var err error
-	s.conn, err = net.Dial("tcp", chatServers[0])
+	for server := 0; server < len(chatServers); server++ {
+		s.conn, err = irc.Dial(chatServers[server])
 
+		if err == nil {
+			break
+		}
+		log.Errorf("An error occurred whilst connecting to %s, %s.", chatServers[server], err.Error())
+	}
 	if err != nil {
-		log.Errorf("An error occurred whilst connecting to %s, %s", chatServers[0], err.Error())
-		return nil, nil
+		log.Criticalf("All servers exhausted. Will not collect metrics for %s", givenChannelName)
 	}
 
 	log.Debug("Connection established.")
 
 	// Create and return the IRC channels
-	s.writer = irc.NewEncoder(s.conn)
-	s.reader = irc.NewDecoder(s.conn)
+	s.writer = &s.conn.Encoder
+	s.reader = &s.conn.Decoder
 
 	readChannel := make(chan *irc.Message, 100)
 	writeChannel := make(chan *string, 10)
+	s.readChan = readChannel
+	s.writeChan = writeChannel
 
 	go s.Read(readChannel)
 	go s.Write(writeChannel)
@@ -72,13 +79,14 @@ func (s *Scraper) Connect(givenChannelName string) (chan<- *string, <-chan *irc.
 }
 
 func (s *Scraper) Read(givenChan chan<- *irc.Message) {
+	pongString := "PONG tmi.twitch.tv"
 	for {
-		s.conn.SetDeadline(time.Now().Add(300 * time.Second))
 		msg, err := s.reader.Decode()
-		if err != nil {
+		if msg.Command == "PING" {
+			log.Debug("Replying to ping")
+			s.writeChan <- &pongString
+		} else if err != nil {
 			log.Errorf("Error received whilst reading message: %s", err.Error())
-			close(givenChan)
-			s.conn.Close()
 			break
 		} else {
 			// We only care about user messages

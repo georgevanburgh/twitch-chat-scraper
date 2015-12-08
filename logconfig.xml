@@ -1,0 +1,8 @@
+<seelog minlevel="debug" type="asynctimer" asyncinterval="1000">
+    <outputs formatid="common">
+        <console/>
+    </outputs>
+    <formats>
+        <format id="common" format="%Date(02-01-2006 15:04:05.000-0700) [%LEVEL] %Msg%n"/>
+    </formats>
+</seelog>

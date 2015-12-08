@@ -10,25 +10,50 @@ import (
 	"io/ioutil"
 	"os"
 	"sync"
+
+	log "github.com/cihub/seelog"
 )
 
 var wg sync.WaitGroup
 var configurationFile string
+var elasticChannel chan<- *irc.Message
 
 func main() {
+	defer log.Flush()
 	// Load configuration from file
+	initializeLogging()
 	parseCommandLineFlags()
 	parseConfigurationFile()
 
-	scraper := twitchchatscraper.NewScraper()
-	writerChan, readerChan := scraper.Connect("capcomfighters")
-
 	wg = sync.WaitGroup{}
+	// wg.Add(1)
 
-	wg.Add(2)
-	go printOutput(readerChan)
-	go readInput(writerChan)
+	elasticBroker := twitchchatscraper.ElasticBroker{}
+	elasticChannel = elasticBroker.Connect()
+
+	for _, channel := range twitchchatscraper.NewLocator().GetTopNChannels(1000) {
+		wg.Add(3)
+		go func(givenChannel string) {
+			defer wg.Done()
+			scraper := twitchchatscraper.NewScraper()
+			writerChan, readerChan := scraper.Connect(givenChannel)
+
+			go printOutput(readerChan)
+			go readInput(writerChan)
+		}(channel)
+	}
 	wg.Wait()
+}
+
+func initializeLogging() {
+	logger, err := log.LoggerFromConfigAsFile("logconfig.xml")
+
+	if err != nil {
+		log.Criticalf("An error occurred whilst initializing logging\n", err.Error())
+		panic(err)
+	}
+
+	log.ReplaceLogger(logger)
 }
 
 func parseCommandLineFlags() {
@@ -48,7 +73,6 @@ func parseConfigurationFile() {
 	if parseError != nil {
 		panic(fmt.Sprintf("Could not parse configuration file: %s", parseError.Error()))
 	}
-	fmt.Println(config.TwitchUsername)
 	twitchchatscraper.SetConfig(&config)
 }
 
@@ -57,7 +81,8 @@ func printOutput(givenChannel <-chan *irc.Message) {
 	for {
 		message, more := <-givenChannel
 		if more {
-			fmt.Printf("%s: %s: %s\n", message.Params[0], message.User, message.Trailing)
+			// log.Debugf("%s: %s: %s", message.Params[0], message.User, message.Trailing)
+			elasticChannel <- message
 		} else {
 			break
 		}
