@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"sync"
 
 	"github.com/FireEater64/twitch-chat-scraper"
@@ -19,6 +17,8 @@ var wg sync.WaitGroup
 var configurationFile string
 var numberOfChannels int
 var elasticChannel chan<- *irc.Message
+var scraper *twitchchatscraper.Scraper
+var clientChannel chan<- *string
 
 func main() {
 	defer log.Flush()
@@ -28,21 +28,22 @@ func main() {
 	parseConfigurationFile()
 
 	wg = sync.WaitGroup{}
-	// wg.Add(1)
 
 	elasticBroker := twitchchatscraper.ElasticBroker{}
 	elasticChannel = elasticBroker.Connect()
 
-	for _, channel := range twitchchatscraper.NewLocator().GetTopNChannels(numberOfChannels) {
-		wg.Add(3)
-		go func(givenChannel string) {
-			defer wg.Done()
-			scraper := twitchchatscraper.NewScraper()
-			writerChan, readerChan := scraper.Connect(givenChannel)
+	for _, channelName := range twitchchatscraper.NewLocator().GetTopNChannels(numberOfChannels) {
+		wg.Add(1)
+		if scraper == nil {
+			scraper = twitchchatscraper.NewScraper()
+			newClientChannel, newReaderChan := scraper.Connect(channelName)
+			clientChannel = newClientChannel
 
-			go printOutput(readerChan)
-			go readInput(writerChan)
-		}(channel)
+			go printOutput(newReaderChan)
+		} else {
+			clientChannel <- &channelName
+		}
+
 	}
 	wg.Wait()
 }
@@ -89,14 +90,5 @@ func printOutput(givenChannel <-chan *irc.Message) {
 		} else {
 			break
 		}
-	}
-}
-
-func readInput(givenChannel chan<- *string) {
-	defer wg.Done()
-	consoleReader := bufio.NewReader(os.Stdin)
-	for {
-		consoleInput, _ := consoleReader.ReadString('\n')
-		givenChannel <- &consoleInput
 	}
 }

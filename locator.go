@@ -63,14 +63,16 @@ func (l *Locator) GetIrcServerAddress(givenChannelName string) []string {
 
 	resp, err := http.Get(url)
 	if err != nil {
+		log.Errorf("Got error whilst trying to retrieve chat servers: %s", err.Error())
 		return nil
 	}
-	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 
 	chatDetails := chatPropertiesResponse{}
 	json.Unmarshal([]byte(body), &chatDetails)
+	log.Infof("Found %s chat servers for %s", len(chatDetails.ChatServers), givenChannelName)
 
+	resp.Body.Close()
 	return chatDetails.ChatServers
 }
 
@@ -87,7 +89,7 @@ func (l *Locator) GetTopNChannels(givenLimit int) []string {
 			}
 			toReturn = append(toReturn, stream.Channel.Name)
 		}
-		offset += 100
+		offset += 101
 	}
 
 	return toReturn

@@ -3,6 +3,7 @@ package twitchchatscraper
 import (
 	// "crypto/tls"
 	"fmt"
+
 	"github.com/sorcix/irc"
 
 	log "github.com/cihub/seelog"
@@ -21,6 +22,7 @@ type Scraper struct {
 	writer      *irc.Encoder
 	readChan    chan *irc.Message
 	writeChan   chan *string
+	clientChan  chan *string
 }
 
 func NewScraper() *Scraper {
@@ -35,6 +37,10 @@ func (s *Scraper) Connect(givenChannelName string) (chan<- *string, <-chan *irc.
 	locator := NewLocator()
 	chatServers := locator.GetIrcServerAddress(givenChannelName)
 	s.chatServers = &chatServers
+
+	if len(chatServers) == 0 {
+		log.Errorf("Error whilst connecting to %s, no chat servers available", givenChannelName)
+	}
 
 	log.Debugf("Trying to connect to %s.", chatServers[0])
 
@@ -51,6 +57,7 @@ func (s *Scraper) Connect(givenChannelName string) (chan<- *string, <-chan *irc.
 	}
 	if err != nil {
 		log.Criticalf("All servers exhausted. Will not collect metrics for %s", givenChannelName)
+		return nil, nil
 	}
 
 	log.Debug("Connection established.")
@@ -61,30 +68,46 @@ func (s *Scraper) Connect(givenChannelName string) (chan<- *string, <-chan *irc.
 
 	readChannel := make(chan *irc.Message, 100)
 	writeChannel := make(chan *string, 10)
+	clientChannel := make(chan *string, 10)
 	s.readChan = readChannel
 	s.writeChan = writeChannel
+	s.clientChan = clientChannel
 
 	go s.Read(readChannel)
 	go s.Write(writeChannel)
+	go s.listenForNewClients()
 
 	// Authenticate with the server
 	authString := fmt.Sprintf(IRC_PASS_STRING, Configuration.TwitchOAuthToken)
 	nickString := fmt.Sprintf(IRC_USER_STRING, Configuration.TwitchUsername)
-	joinString := fmt.Sprintf(IRC_JOIN_STRING, givenChannelName)
-	writeChannel <- &authString
-	writeChannel <- &nickString
-	writeChannel <- &joinString
+	s.writeChan <- &authString
+	s.writeChan <- &nickString
+	s.clientChan <- &givenChannelName
 
-	return writeChannel, readChannel
+	return clientChannel, readChannel
+}
+
+func (s *Scraper) listenForNewClients() {
+	for {
+		channelToSubscribeTo := <-s.clientChan
+		log.Debugf("Asked to subscribe to: %s", *channelToSubscribeTo)
+
+		joinString := fmt.Sprintf(IRC_JOIN_STRING, *channelToSubscribeTo)
+		s.writeChan <- &joinString
+	}
 }
 
 func (s *Scraper) Read(givenChan chan<- *irc.Message) {
 	pongString := "PONG tmi.twitch.tv"
 	for {
 		msg, err := s.reader.Decode()
-		if msg.Command == "PING" {
+		if msg == nil {
+			log.Errorf("Nil/deformed message %s", msg)
+		} else if msg.Command == "PING" {
 			log.Debug("Replying to ping")
 			s.writeChan <- &pongString
+		} else if msg.Command != "PRIVMSG" {
+			log.Debugf("Control message received: %s", msg)
 		} else if err != nil {
 			log.Errorf("Error received whilst reading message: %s", err.Error())
 			break
