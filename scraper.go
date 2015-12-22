@@ -3,6 +3,7 @@ package twitchchatscraper
 import (
 	// "crypto/tls"
 	"fmt"
+	"time"
 
 	"github.com/sorcix/irc"
 
@@ -68,7 +69,7 @@ func (s *Scraper) Connect(givenChannelName string) (chan<- *string, <-chan *irc.
 
 	readChannel := make(chan *irc.Message, 100)
 	writeChannel := make(chan *string, 10)
-	clientChannel := make(chan *string, 10)
+	clientChannel := make(chan *string, 10000)
 	s.readChan = readChannel
 	s.writeChan = writeChannel
 	s.clientChan = clientChannel
@@ -94,6 +95,7 @@ func (s *Scraper) listenForNewClients() {
 
 		joinString := fmt.Sprintf(IRC_JOIN_STRING, *channelToSubscribeTo)
 		s.writeChan <- &joinString
+		time.Sleep(time.Second * 2) // We don't want to get rate limited
 	}
 }
 
@@ -103,6 +105,7 @@ func (s *Scraper) Read(givenChan chan<- *irc.Message) {
 		msg, err := s.reader.Decode()
 		if msg == nil {
 			log.Errorf("Nil/deformed message %s", msg)
+			break
 		} else if msg.Command == "PING" {
 			log.Debug("Replying to ping")
 			s.writeChan <- &pongString
