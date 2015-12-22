@@ -32,7 +32,8 @@ func main() {
 	elasticBroker := twitchchatscraper.ElasticBroker{}
 	elasticChannel = elasticBroker.Connect()
 
-	for _, channelName := range twitchchatscraper.NewLocator().GetTopNChannels(numberOfChannels) {
+	locator := twitchchatscraper.NewLocator()
+	for _, channelName := range locator.GetTopNChannels(numberOfChannels) {
 		wg.Add(1)
 		if scraper == nil {
 			scraper = twitchchatscraper.NewScraper()
