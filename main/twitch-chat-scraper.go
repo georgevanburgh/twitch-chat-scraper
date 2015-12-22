@@ -5,17 +5,19 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/FireEater64/twitch-chat-scraper"
-	"github.com/sorcix/irc"
 	"io/ioutil"
 	"os"
 	"sync"
+
+	"github.com/FireEater64/twitch-chat-scraper"
+	"github.com/sorcix/irc"
 
 	log "github.com/cihub/seelog"
 )
 
 var wg sync.WaitGroup
 var configurationFile string
+var numberOfChannels int
 var elasticChannel chan<- *irc.Message
 
 func main() {
@@ -31,7 +33,7 @@ func main() {
 	elasticBroker := twitchchatscraper.ElasticBroker{}
 	elasticChannel = elasticBroker.Connect()
 
-	for _, channel := range twitchchatscraper.NewLocator().GetTopNChannels(1000) {
+	for _, channel := range twitchchatscraper.NewLocator().GetTopNChannels(numberOfChannels) {
 		wg.Add(3)
 		go func(givenChannel string) {
 			defer wg.Done()
@@ -58,6 +60,7 @@ func initializeLogging() {
 
 func parseCommandLineFlags() {
 	flag.StringVar(&configurationFile, "config", "config.json", "The location of the config.json file")
+	flag.IntVar(&numberOfChannels, "channels", 1000, "The number of top channels to subscribe to")
 
 	flag.Parse()
 }
