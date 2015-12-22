@@ -1,9 +1,10 @@
 package twitchchatscraper
 
 import (
+	"time"
+
 	"github.com/sorcix/irc"
 	"gopkg.in/olivere/elastic.v3"
-	"time"
 
 	log "github.com/cihub/seelog"
 )
@@ -24,7 +25,7 @@ func (e *ElasticBroker) Connect() chan<- *irc.Message {
 	inputChannel := make(chan *irc.Message, 10000)
 	e.inputChannel = inputChannel
 	var clientError error
-	e.elastiClient, clientError = elastic.NewClient(elastic.SetURL("http://192.168.1.110:9200"), elastic.SetSniff(false)) // Make configurable
+	e.elastiClient, clientError = elastic.NewClient(elastic.SetURL("http://127.0.0.1:9200"), elastic.SetSniff(false)) // Make configurable
 	if clientError != nil {
 		log.Errorf("Error connecting to elasticsearch: %s", clientError.Error())
 	}
