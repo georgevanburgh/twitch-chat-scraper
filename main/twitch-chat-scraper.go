@@ -15,6 +15,7 @@ import (
 
 var wg sync.WaitGroup
 var configurationFile string
+var elasticSearchHost string
 var numberOfChannels int
 var elasticChannel chan<- *irc.Message
 var scraper *twitchchatscraper.Scraper
@@ -30,7 +31,7 @@ func main() {
 	wg = sync.WaitGroup{}
 
 	elasticBroker := twitchchatscraper.ElasticBroker{}
-	elasticChannel = elasticBroker.Connect()
+	elasticChannel = elasticBroker.Connect(elasticSearchHost)
 
 	locator := twitchchatscraper.NewLocator()
 	topChannels := locator.GetTopNChannels(numberOfChannels)
@@ -64,6 +65,7 @@ func initializeLogging() {
 func parseCommandLineFlags() {
 	flag.StringVar(&configurationFile, "config", "config.json", "The location of the config.json file")
 	flag.IntVar(&numberOfChannels, "channels", 1000, "The number of top channels to subscribe to")
+	flag.StringVar(&elasticSearchHost, "eshost", "http://127.0.0.1:9200", "The address of the ElasticSearch server to send stats to")
 
 	flag.Parse()
 }

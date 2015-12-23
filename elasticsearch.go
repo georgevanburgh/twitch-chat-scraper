@@ -22,11 +22,11 @@ type TwitchMessage struct {
 	Timestamp time.Time `json:"@timestamp"`
 }
 
-func (e *ElasticBroker) Connect() chan<- *irc.Message {
+func (e *ElasticBroker) Connect(givenUrl string) chan<- *irc.Message {
 	inputChannel := make(chan *irc.Message, 10000)
 	e.inputChannel = inputChannel
 	var clientError error
-	e.elastiClient, clientError = elastic.NewClient(elastic.SetURL("http://127.0.0.1:9200"), elastic.SetSniff(false)) // Make configurable
+	e.elastiClient, clientError = elastic.NewClient(elastic.SetURL(givenUrl), elastic.SetSniff(false)) // Make configurable
 	if clientError != nil {
 		log.Errorf("Error connecting to elasticsearch: %s", clientError.Error())
 	}
