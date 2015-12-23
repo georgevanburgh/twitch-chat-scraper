@@ -1,6 +1,7 @@
 package twitchchatscraper
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/sorcix/irc"
@@ -39,7 +40,8 @@ func (e *ElasticBroker) listenForMessages() {
 	for {
 		message := <-e.inputChannel
 		twitchMessage := TwitchMessage{Channel: message.Params[0], Message: message.Trailing, From: message.User, Timestamp: time.Now()}
-		bulkRequest.Add(elastic.NewBulkIndexRequest().Index("twitch").Type("chatmessage").Doc(twitchMessage))
+		indexToInsertInto := fmt.Sprintf("twitch-%s", twitchMessage.Timestamp.Format("2006.01.02"))
+		bulkRequest.Add(elastic.NewBulkIndexRequest().Index(indexToInsertInto).Type("chatmessage").Doc(twitchMessage))
 
 		if bulkRequest.NumberOfActions() > 999 {
 			log.Debugf("Applying %d bulk operations", bulkRequest.NumberOfActions())
