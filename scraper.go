@@ -147,7 +147,7 @@ func (s *Scraper) Read(givenChan chan<- *irc.Message) {
 			log.Debug("Replying to ping")
 			s.writeChan <- &pongString
 		} else if msg.Command == "001" {
-			log.Debugf("IRC Connection message received")
+			log.Debugf("IRC RPL_WELCOME received")
 			s.connected = true
 		} else if msg.Command != "PRIVMSG" {
 			log.Debugf("Control message received: %s", msg)
