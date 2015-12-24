@@ -11,37 +11,50 @@ import (
 )
 
 const (
-	IRC_PASS_STRING = "PASS %s"
-	IRC_USER_STRING = "NICK %s"
-	IRC_JOIN_STRING = "JOIN #%s"
+	IRC_PASS_STRING              = "PASS %s"
+	IRC_USER_STRING              = "NICK %s"
+	IRC_JOIN_STRING              = "JOIN #%s"
+	TIME_TO_WAIT_FOR_CONNECTION  = time.Second * 5
+	TIME_BETWEEN_CHANNEL_SCRAPES = time.Minute * 20
+	CHANNELS_TO_GET_PER_SCRAPE   = 1000
 )
 
 type Scraper struct {
-	chatServers *[]string
-	conn        *irc.Conn
-	reader      *irc.Decoder
-	writer      *irc.Encoder
-	readChan    chan *irc.Message
-	writeChan   chan *string
-	clientChan  chan *string
+	chatServers  *[]string
+	conn         *irc.Conn
+	reader       *irc.Decoder
+	writer       *irc.Encoder
+	readChan     chan *irc.Message
+	writeChan    chan *string
+	clientChan   chan *string
+	SubscribedTo map[string]bool
+	connected    bool
 }
 
 func NewScraper() *Scraper {
 	newScraper := Scraper{}
+	newScraper.SubscribedTo = make(map[string]bool, 0)
 	return &newScraper
 }
 
-func (s *Scraper) Connect(givenChannelName string) (chan<- *string, <-chan *irc.Message) {
-	log.Debugf("Connecting to Twitch chat for %s", givenChannelName)
+func (s *Scraper) Connect() (chan<- *string, <-chan *irc.Message) {
+	log.Debug("Connecting to Twitch IRC")
 
-	// Grab the list of chat servers for this channel
-	locator := NewLocator()
-	chatServers := locator.GetIrcServerAddress(givenChannelName)
-	s.chatServers = &chatServers
-
-	if len(chatServers) == 0 {
-		log.Errorf("Error whilst connecting to %s, no chat servers available", givenChannelName)
-	}
+	// List of twitch chat servers (should definitely not be hardcoded)
+	chatServers := [...]string{
+		"192.16.64.174:6667",
+		"192.16.64.175:6667",
+		"192.16.64.176:6667",
+		"192.16.64.177:6667",
+		"192.16.64.178:6667",
+		"192.16.64.179:6667",
+		"192.16.64.205:6667",
+		"192.16.64.206:6667",
+		"192.16.64.207:6667",
+		"192.16.64.208:6667",
+		"192.16.64.209:6667",
+		"192.16.64.210:6667",
+		"192.16.64.211:6667"}
 
 	log.Debugf("Trying to connect to %s.", chatServers[0])
 
@@ -57,13 +70,13 @@ func (s *Scraper) Connect(givenChannelName string) (chan<- *string, <-chan *irc.
 		log.Errorf("An error occurred whilst connecting to %s, %s.", chatServers[server], err.Error())
 	}
 	if err != nil {
-		log.Criticalf("All servers exhausted. Will not collect metrics for %s", givenChannelName)
-		return nil, nil
+		log.Criticalf("All servers exhausted. Could not connect to IRC")
+		panic("All servers exhausted. Could not connect to IRC")
 	}
 
 	log.Debug("Connection established.")
 
-	// Create and return the IRC channels
+	// Create the IRC communication channels
 	s.writer = &s.conn.Encoder
 	s.reader = &s.conn.Decoder
 
@@ -76,15 +89,33 @@ func (s *Scraper) Connect(givenChannelName string) (chan<- *string, <-chan *irc.
 
 	go s.Read(readChannel)
 	go s.Write(writeChannel)
-	go s.listenForNewClients()
 
 	// Authenticate with the server
 	authString := fmt.Sprintf(IRC_PASS_STRING, Configuration.TwitchOAuthToken)
 	nickString := fmt.Sprintf(IRC_USER_STRING, Configuration.TwitchUsername)
 	s.writeChan <- &authString
 	s.writeChan <- &nickString
-	s.clientChan <- &givenChannelName
 
+	// Timeout after a certain amount of time waiting for confirmation
+	timer := time.NewTimer(TIME_TO_WAIT_FOR_CONNECTION)
+	connectedNotification := make(chan bool, 1)
+	go func() {
+		for !s.connected {
+		}
+		connectedNotification <- true
+	}()
+
+	select {
+	case <-timer.C:
+		log.Critical("Timeout whilst authenticating with Twitch chat")
+		panic("Timeout whilst authenticating with Twitch chat")
+	case <-connectedNotification:
+		log.Debug("Successfully authenticated with Twitch chat")
+	}
+
+	// Assuming we've successfully authenticated - we can start subscribing to
+	// chats, and return the channels for use
+	go s.listenForNewClients()
 	return clientChannel, readChannel
 }
 
@@ -93,9 +124,15 @@ func (s *Scraper) listenForNewClients() {
 		channelToSubscribeTo := <-s.clientChan
 		log.Debugf("Asked to subscribe to: %s", *channelToSubscribeTo)
 
-		joinString := fmt.Sprintf(IRC_JOIN_STRING, *channelToSubscribeTo)
-		s.writeChan <- &joinString
-		time.Sleep(time.Second * 2) // We don't want to get rate limited
+		if !s.SubscribedTo[*channelToSubscribeTo] {
+			s.SubscribedTo[*channelToSubscribeTo] = true
+			joinString := fmt.Sprintf(IRC_JOIN_STRING, *channelToSubscribeTo)
+			s.writeChan <- &joinString
+			time.Sleep(time.Second * 2) // We don't want to get rate limited
+		} else { // No need to worry about rate limit if we're already subscribed
+			log.Debugf("We're already subscribed to %s", channelToSubscribeTo)
+		}
+
 	}
 }
 
@@ -109,6 +146,9 @@ func (s *Scraper) Read(givenChan chan<- *irc.Message) {
 		} else if msg.Command == "PING" {
 			log.Debug("Replying to ping")
 			s.writeChan <- &pongString
+		} else if msg.Command == "001" {
+			log.Debugf("IRC Connection message received")
+			s.connected = true
 		} else if msg.Command != "PRIVMSG" {
 			log.Debugf("Control message received: %s", msg)
 		} else if err != nil {
@@ -131,5 +171,28 @@ func (s *Scraper) Write(givenChan <-chan *string) {
 			log.Errorf("Error sending message %s: %s", *messageToSend, err.Error())
 			break
 		}
+	}
+}
+
+func (s *Scraper) StartMessages() {
+	log.Debug("Starting messages")
+	go s.refreshChannels()
+
+	ticker := time.NewTicker(TIME_BETWEEN_CHANNEL_SCRAPES)
+	go func() {
+		for {
+			<-ticker.C
+			s.refreshChannels()
+			log.Debug("Grabbed new channels")
+			log.Debugf("Now subscribed to %d channels", len(s.SubscribedTo))
+		}
+	}()
+}
+
+func (s *Scraper) refreshChannels() {
+	locator := NewLocator()
+	topChannels := locator.GetTopNChannels(CHANNELS_TO_GET_PER_SCRAPE)
+	for i := 0; i < len(topChannels); i++ {
+		s.clientChan <- &topChannels[i]
 	}
 }
