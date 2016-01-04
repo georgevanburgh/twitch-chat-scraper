@@ -2,7 +2,10 @@ package twitchchatscraper
 
 import (
 	// "crypto/tls"
+	"bufio"
 	"fmt"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/sorcix/irc"
@@ -20,20 +23,23 @@ const (
 )
 
 type Scraper struct {
-	chatServers  *[]string
-	conn         *irc.Conn
-	reader       *irc.Decoder
-	writer       *irc.Encoder
-	readChan     chan *irc.Message
-	writeChan    chan *string
-	clientChan   chan *string
-	SubscribedTo map[string]bool
-	connected    bool
+	chatServers         *[]string
+	conn                *irc.Conn
+	reader              *irc.Decoder
+	writer              *irc.Encoder
+	readChan            chan *irc.Message
+	writeChan           chan *string
+	clientChan          chan *string
+	SubscribedTo        map[string]bool
+	connected           bool
+	blacklistedChannels map[string]bool
+	blacklistMutex      *sync.Mutex
 }
 
 func NewScraper() *Scraper {
 	newScraper := Scraper{}
 	newScraper.SubscribedTo = make(map[string]bool, 0)
+	newScraper.blacklistMutex = &sync.Mutex{}
 	return &newScraper
 }
 
@@ -124,14 +130,22 @@ func (s *Scraper) listenForNewClients() {
 		channelToSubscribeTo := <-s.clientChan
 		log.Debugf("Asked to subscribe to: %s", *channelToSubscribeTo)
 
-		if !s.SubscribedTo[*channelToSubscribeTo] {
+		s.blacklistMutex.Lock()
+
+		if s.SubscribedTo[*channelToSubscribeTo] {
+			// No need to worry about rate limit if we're already subscribed
+			log.Debugf("We're already subscribed to %s", *channelToSubscribeTo)
+		} else if s.blacklistedChannels[*channelToSubscribeTo] {
+			// This channel is on the blacklist
+			log.Debugf("We've been asked not to join %s", *channelToSubscribeTo)
+		} else {
 			s.SubscribedTo[*channelToSubscribeTo] = true
 			joinString := fmt.Sprintf(IRC_JOIN_STRING, *channelToSubscribeTo)
 			s.writeChan <- &joinString
 			time.Sleep(time.Second * 2) // We don't want to get rate limited
-		} else { // No need to worry about rate limit if we're already subscribed
-			log.Debugf("We're already subscribed to %s", channelToSubscribeTo)
 		}
+
+		s.blacklistMutex.Unlock()
 
 	}
 }
@@ -191,8 +205,47 @@ func (s *Scraper) StartMessages() {
 
 func (s *Scraper) refreshChannels() {
 	locator := NewLocator()
+	s.refreshBlacklist()
 	topChannels := locator.GetTopNChannels(CHANNELS_TO_GET_PER_SCRAPE)
 	for i := 0; i < len(topChannels); i++ {
 		s.clientChan <- &topChannels[i]
 	}
+}
+
+// Temporary hack to allow (manual) blacklisting of channels
+func (s *Scraper) refreshBlacklist() {
+	// Check whether we even have a blacklist file
+	if _, err := os.Stat(".channelblacklist"); os.IsNotExist(err) {
+		// We don't have a blacklist file
+		log.Debug("No .channelblacklist file detected")
+		return
+	}
+
+	file, err := os.Open(".channelblacklist")
+
+	if err != nil {
+		log.Criticalf("Problem when opening blacklist file: %s", err.Error())
+		return
+	}
+	defer file.Close()
+
+	newBlacklist := make(map[string]bool)
+
+	// Read in the new blacklist
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		s.blacklistedChannels[scanner.Text()] = true
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Criticalf("Error whilst reading blacklist file: %s. Not swapping list",
+			err.Error())
+		return
+	}
+
+	// Locking probably not required - but hey, why not
+	// Old map should be GC'ed
+	s.blacklistMutex.Lock()
+	s.blacklistedChannels = newBlacklist
+	s.blacklistMutex.Unlock()
 }
