@@ -234,7 +234,7 @@ func (s *Scraper) refreshBlacklist() {
 	// Read in the new blacklist
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		s.blacklistedChannels[scanner.Text()] = true
+		newBlacklist[scanner.Text()] = true
 	}
 
 	if err := scanner.Err(); err != nil {
