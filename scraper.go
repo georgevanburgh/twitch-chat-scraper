@@ -17,6 +17,7 @@ const (
 	IRC_PASS_STRING              = "PASS %s"
 	IRC_USER_STRING              = "NICK %s"
 	IRC_JOIN_STRING              = "JOIN #%s"
+	IRC_PART_STRING              = "PART #%s"
 	TIME_TO_WAIT_FOR_CONNECTION  = time.Second * 5
 	TIME_BETWEEN_CHANNEL_SCRAPES = time.Minute * 20
 	CHANNELS_TO_GET_PER_SCRAPE   = 1000
@@ -206,9 +207,22 @@ func (s *Scraper) StartMessages() {
 func (s *Scraper) refreshChannels() {
 	locator := NewLocator()
 	s.refreshBlacklist()
+	s.partBlacklistedChannels()
 	topChannels := locator.GetTopNChannels(CHANNELS_TO_GET_PER_SCRAPE)
 	for i := 0; i < len(topChannels); i++ {
 		s.clientChan <- &topChannels[i]
+	}
+}
+
+func (s *Scraper) partBlacklistedChannels() {
+	// This is disgusting
+	for channel := range s.blacklistedChannels {
+		if s.SubscribedTo[channel] {
+			leaveString := fmt.Sprintf(IRC_PART_STRING, channel)
+			s.writeChan <- &leaveString
+			delete(s.SubscribedTo, channel)
+			time.Sleep(time.Second * 2)
+		}
 	}
 }
 
