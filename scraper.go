@@ -18,6 +18,7 @@ const (
 	IRC_USER_STRING              = "NICK %s"
 	IRC_JOIN_STRING              = "JOIN #%s"
 	IRC_PART_STRING              = "PART #%s"
+	TWITCH_CHAT_SERVER_ADDRESS   = "irc.twitch.tv:6667"
 	TIME_TO_WAIT_FOR_CONNECTION  = time.Second * 5
 	TIME_BETWEEN_CHANNEL_SCRAPES = time.Minute * 20
 	CHANNELS_TO_GET_PER_SCRAPE   = 1000
@@ -47,38 +48,12 @@ func NewScraper() *Scraper {
 func (s *Scraper) Connect() (chan<- *string, <-chan *irc.Message) {
 	log.Debug("Connecting to Twitch IRC")
 
-	// List of twitch chat servers (should definitely not be hardcoded)
-	chatServers := [...]string{
-		"192.16.64.174:6667",
-		"192.16.64.175:6667",
-		"192.16.64.176:6667",
-		"192.16.64.177:6667",
-		"192.16.64.178:6667",
-		"192.16.64.179:6667",
-		"192.16.64.205:6667",
-		"192.16.64.206:6667",
-		"192.16.64.207:6667",
-		"192.16.64.208:6667",
-		"192.16.64.209:6667",
-		"192.16.64.210:6667",
-		"192.16.64.211:6667"}
-
-	log.Debugf("Trying to connect to %s.", chatServers[0])
-
-	// Connect to the first chat server in the list
-	// TODO: There should probably be some intelligence around selecting this
+	// Connect to twitch chat
 	var err error
-	for server := 0; server < len(chatServers); server++ {
-		s.conn, err = irc.Dial(chatServers[server])
-
-		if err == nil {
-			break
-		}
-		log.Errorf("An error occurred whilst connecting to %s, %s.", chatServers[server], err.Error())
-	}
+	s.conn, err = irc.Dial(TWITCH_CHAT_SERVER_ADDRESS)
 	if err != nil {
-		log.Criticalf("All servers exhausted. Could not connect to IRC")
-		panic("All servers exhausted. Could not connect to IRC")
+		log.Errorf("An error occurred whilst connecting to twitch chat, %s.", err.Error())
+		panic(err)
 	}
 
 	log.Debug("Connection established.")
